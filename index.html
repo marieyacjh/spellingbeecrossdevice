@@ -29,7 +29,6 @@
             overflow: hidden;
         }
         
-        /* Animated Bee Styles */
         .pastel-bee {
             position: absolute; width: 50px; height: 40px; background: var(--bee-yellow);
             border-radius: 50%; border: 2px solid #000; opacity: 0.8; z-index: 0;
@@ -40,7 +39,7 @@
             width: 10px; height: 30px; border-left: 5px solid #000; border-right: 5px solid #000;
         }
         .pastel-bee::before {
-            content: 'Wings'; color: transparent; position: absolute; top: -10px; left: 10px;
+            content: ''; position: absolute; top: -10px; left: 10px;
             width: 20px; height: 15px; background: rgba(255,255,255,0.7); border-radius: 50%;
             box-shadow: 15px 0 0 rgba(255,255,255,0.7);
         }
@@ -218,10 +217,9 @@
 
         // --- CLOUD STORAGE CONFIG ---
         const CLOUD_API = "https://api.jsonbin.io/v3/b";
-        // YOUR UPDATED MASTER KEY
         const MASTER_KEY = "$2a$10$v3nd9C5rsdN9mSEF7wa2DundqvfYxwzC2P4D8lB0wF3Mtp3.j5TLm"; 
 
-        // --- Animations ---
+        // --- UI & Animations ---
         function createBees() {
             const menu = document.getElementById('menu-screen');
             for(let i=0; i<5; i++) {
@@ -229,29 +227,106 @@
                 bee.className = 'pastel-bee';
                 bee.style.top = Math.random() * 80 + '%';
                 bee.style.animationDelay = (Math.random() * 5) + 's';
-                bee.style.animationDuration = (6 + Math.random() * 4) + 's';
                 menu.appendChild(bee);
             }
         }
         createBees();
 
-        // --- Navigation ---
         function showScreen(id) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             document.getElementById(id).classList.add('active');
         }
 
-        function openModeSelect(mode) { 
-            gameMode = mode; 
-            showScreen('mode-screen'); 
-        }
+        function openModeSelect(mode) { gameMode = mode; showScreen('mode-screen'); }
 
-        // --- Game Logic ---
         function speakWord() {
             const u = new SpeechSynthesisUtterance(currentWords[wordIndex]);
             u.lang = 'en-US'; window.speechSynthesis.speak(u);
         }
 
+        // --- Cloud Storage Functions ---
+        async function saveWords() {
+            const list = document.getElementById('word-input').value.split('\n').filter(x => x.trim());
+            if(!list.length) return;
+
+            const saveBtn = document.getElementById('save-btn');
+            saveBtn.innerText = "SAVING...";
+            saveBtn.disabled = true;
+
+            const code = Math.random().toString(36).substring(2, 6).toUpperCase();
+
+            try {
+                const response = await fetch(CLOUD_API, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Master-Key': MASTER_KEY,
+                        'X-Bin-Name': code,
+                        'X-Bin-Private': false 
+                    },
+                    body: JSON.stringify(list)
+                });
+
+                if (!response.ok) throw new Error("Cloud rejected save");
+
+                const result = await response.json();
+                const binId = result.metadata.id;
+
+                localStorage.setItem('words_' + code, JSON.stringify(list));
+                localStorage.setItem('binid_' + code, binId);
+                
+                let history = JSON.parse(localStorage.getItem('history') || "[]");
+                history.unshift(code);
+                localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
+                
+                currentWords = list;
+                alert("SYNC SUCCESSFUL!\nCode: " + code + "\n\nGive this code to your students.");
+                showScreen('menu-screen');
+            } catch (e) {
+                alert("Error: Internet required for cloud sync.");
+            } finally {
+                saveBtn.innerText = "SAVE & GENERATE CODE";
+                saveBtn.disabled = false;
+            }
+        }
+
+        async function loadByCode() {
+            const code = document.getElementById('game-code-input').value.toUpperCase().trim();
+            if(code.length !== 4) return alert("Enter 4 characters");
+
+            const loadBtn = document.getElementById('load-btn');
+            loadBtn.innerText = "SEARCHING...";
+
+            try {
+                let binId = localStorage.getItem('binid_' + code);
+
+                if (!binId) {
+                    const searchRes = await fetch(`https://api.jsonbin.io/v3/get/list`, {
+                        headers: { 'X-Master-Key': MASTER_KEY }
+                    });
+                    const bins = await searchRes.json();
+                    const found = bins.find(b => b.snippetMeta.name === code);
+                    if (found) binId = found.record;
+                }
+
+                if (binId) {
+                    const dataRes = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest?meta=false`, {
+                        headers: { 'X-Master-Key': MASTER_KEY }
+                    });
+                    currentWords = await dataRes.json();
+                    alert("Game Loaded!");
+                    showScreen('menu-screen');
+                } else {
+                    alert("Code not found. Make sure you saved the list correctly.");
+                }
+            } catch (e) {
+                alert("Network error. Check connection.");
+            } finally {
+                loadBtn.innerText = "LOAD GAME";
+            }
+        }
+
+        // --- Game Mechanics ---
         function startGame(style) {
             gameStyle = style; 
             if(gameMode === 'duel' && document.getElementById('mode-screen').classList.contains('active')) {
@@ -276,7 +351,6 @@
             const currentText = clearDisplay ? "" : (document.getElementById(side + "-display")?.innerText || "");
             container.innerHTML = '';
             const word = currentWords[wordIndex];
-
             if(gameStyle === 'spell') {
                 const display = document.createElement('div');
                 display.id = side + "-display"; display.className = "display-area";
@@ -294,60 +368,41 @@
             const targetDiv = document.createElement('div');
             targetDiv.className = "target-slots";
             targetDiv.id = side + "-target";
-
             const poolDiv = document.createElement('div');
             poolDiv.className = "letter-pool";
             poolDiv.id = side + "-pool";
-
             for(let char of word) {
                 const slot = document.createElement('div');
                 if(char === " ") {
-                    slot.className = "slot space-slot";
-                    slot.innerText = " ";
+                    slot.className = "slot space-slot"; slot.innerText = " ";
                 } else {
                     slot.className = "slot";
                     slot.onclick = () => {
                         if(isWaitingForNext || !slot.innerText) return;
-                        const tileId = slot.dataset.tileId;
-                        const originalTile = document.getElementById(tileId);
-                        if(originalTile) originalTile.style.visibility = "visible";
-                        slot.innerText = "";
-                        slot.style.background = "rgba(255,255,255,0.5)";
-                        slot.style.border = "3px dashed #ccc";
-                        slot.classList.remove('filled');
+                        document.getElementById(slot.dataset.tileId).style.visibility = "visible";
+                        slot.innerText = ""; slot.classList.remove('filled');
                     };
                 }
                 targetDiv.appendChild(slot);
             }
-
             const letters = word.replace(/\s/g, '').split('').sort(() => Math.random() - 0.5);
             letters.forEach((l, index) => {
                 const tile = document.createElement('div');
-                tile.className = "tile";
-                tile.id = side + "-tile-" + index;
-                tile.innerText = l;
+                tile.className = "tile"; tile.id = side + "-tile-" + index; tile.innerText = l;
                 tile.onclick = () => {
                     if(isWaitingForNext) return;
                     const emptySlots = targetDiv.querySelectorAll('.slot:not(.space-slot)');
                     for(let slot of emptySlots) {
                         if(!slot.innerText) {
-                            slot.innerText = l;
-                            slot.dataset.tileId = tile.id;
-                            slot.style.background = "var(--bee-yellow)";
-                            slot.style.border = "3px solid black";
-                            slot.classList.add('filled');
-                            tile.style.visibility = "hidden";
-                            checkUnscrambleWin(side, word);
-                            break;
+                            slot.innerText = l; slot.dataset.tileId = tile.id;
+                            slot.classList.add('filled'); tile.style.visibility = "hidden";
+                            checkUnscrambleWin(side, word); break;
                         }
                     }
                 };
                 poolDiv.appendChild(tile);
             });
-
-            wrapper.appendChild(targetDiv);
-            wrapper.appendChild(poolDiv);
-            container.appendChild(wrapper);
+            wrapper.appendChild(targetDiv); wrapper.appendChild(poolDiv); container.appendChild(wrapper);
         }
 
         function checkUnscrambleWin(side, word) {
@@ -373,20 +428,11 @@
                 kb.appendChild(rowDiv);
             });
             const row4 = document.createElement('div'); row4.className = "kb-row";
-            const shift = document.createElement('div'); 
-            shift.className = "key" + (isCaps ? " key-active" : ""); 
-            shift.innerText = "SHIFT"; 
-            shift.onclick = () => { 
-                if(!isWaitingForNext) { 
-                    isCaps = !isCaps; 
-                    renderRound(container.id, side, false); 
-                } 
-            };
+            const shift = document.createElement('div'); shift.className = "key" + (isCaps ? " key-active" : ""); shift.innerText = "SHIFT"; 
+            shift.onclick = () => { if(!isWaitingForNext) { isCaps = !isCaps; renderRound(container.id, side, false); } };
             const space = document.createElement('div'); space.className = "key"; space.innerText = "SPACE"; space.style.width="120px"; space.onclick = () => handleInput(side, " ");
-            const del = document.createElement('div'); del.className = "key"; del.innerText = "DEL"; del.onclick = () => {
-                if(isWaitingForNext) return;
-                const d = document.getElementById(side + "-display"); d.innerText = d.innerText.slice(0, -1);
-            };
+            const del = document.createElement('div'); del.className = "key"; del.innerText = "DEL"; 
+            del.onclick = () => { if(!isWaitingForNext) { const d = document.getElementById(side + "-display"); d.innerText = d.innerText.slice(0, -1); } };
             row4.appendChild(shift); row4.appendChild(space); row4.appendChild(del);
             kb.appendChild(row4); container.appendChild(kb);
         }
@@ -395,14 +441,8 @@
             if(isWaitingForNext) return;
             const display = document.getElementById(side + "-display");
             display.innerText += char;
-            if(isCaps) {
-                isCaps = false;
-                renderRound(side === 'p' ? 'p-play' : side + '-play', side, false);
-            }
-            if(display.innerText === currentWords[wordIndex]) {
-                display.classList.add('correct-flash');
-                handleWin(side);
-            }
+            if(isCaps) { isCaps = false; renderRound(side === 'p' ? 'p-play' : side + '-play', side, false); }
+            if(display.innerText === currentWords[wordIndex]) { display.classList.add('correct-flash'); handleWin(side); }
         }
 
         function handleWin(side) {
@@ -422,96 +462,17 @@
         }
 
         function nextWord() {
-            wordIndex++;
-            isWaitingForNext = false;
-            isCaps = false;
-            hideNextButtons();
-            if(wordIndex >= currentWords.length) { 
-                alert(`GAME OVER!\nFinal Scores:\nTeam A: ${scoreA}\nTeam B: ${scoreB}`); 
-                showScreen('menu-screen'); 
-            } else {
+            wordIndex++; isWaitingForNext = false; isCaps = false; hideNextButtons();
+            if(wordIndex >= currentWords.length) { alert("GAME OVER!"); showScreen('menu-screen'); } 
+            else {
                 if(gameMode === 'practice') renderRound('p-play', 'p', true);
                 else { renderRound('l-play', 'l', true); renderRound('r-play', 'r', true); }
             }
         }
 
         function hideNextButtons() {
-            if(document.getElementById('next-btn-p')) document.getElementById('next-btn-p').style.display = 'none';
-            if(document.getElementById('next-btn-duel')) document.getElementById('next-btn-duel').style.display = 'none';
-        }
-
-        // --- UPDATED CLOUD SYNC LOGIC ---
-
-        function generateShortCode() {
-            return Math.random().toString(36).substring(2, 6).toUpperCase();
-        }
-
-        async function saveWords() {
-            const list = document.getElementById('word-input').value.split('\n').filter(x => x.trim());
-            if(!list.length) return;
-
-            const saveBtn = document.getElementById('save-btn');
-            saveBtn.innerText = "SAVING...";
-            saveBtn.disabled = true;
-
-            const code = generateShortCode();
-
-            try {
-                // Saving to Cloud using your actual Master Key
-                await fetch(CLOUD_API, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Bin-Name': code,
-                        'X-Master-Key': MASTER_KEY
-                    },
-                    body: JSON.stringify(list)
-                });
-
-                localStorage.setItem('words_' + code, JSON.stringify(list));
-                let history = JSON.parse(localStorage.getItem('history') || "[]");
-                history.unshift(code);
-                localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
-                
-                currentWords = list;
-                alert("GAME SAVED!\nYour 4-character code is: " + code + "\n\nUse this on any iPad or Mobile device!");
-                showScreen('menu-screen');
-            } catch (e) {
-                alert("Error saving to cloud. Please check your internet connection.");
-            } finally {
-                saveBtn.innerText = "SAVE & GENERATE CODE";
-                saveBtn.disabled = false;
-            }
-        }
-
-        async function loadByCode() {
-            const code = document.getElementById('game-code-input').value.toUpperCase().trim();
-            if(code.length !== 4) return alert("Enter 4 characters");
-
-            const loadBtn = document.getElementById('load-btn');
-            loadBtn.innerText = "LOADING...";
-            
-            try {
-                // Fetch from cloud using your Master Key
-                const response = await fetch(`${CLOUD_API}/latest?meta=false`, {
-                    headers: { 
-                        'X-Master-Key': MASTER_KEY,
-                        'X-Bin-Name': code
-                    }
-                });
-
-                if (response.ok) {
-                    currentWords = await response.json();
-                    localStorage.setItem('words_' + code, JSON.stringify(currentWords));
-                    showScreen('menu-screen');
-                } else {
-                    alert("Code not found. Check the code and try again.");
-                }
-            } catch (e) {
-                alert("Connection Error. Is the device online?");
-            } finally {
-                loadBtn.innerText = "LOAD GAME";
-            }
+            document.getElementById('next-btn-p').style.display = 'none';
+            document.getElementById('next-btn-duel').style.display = 'none';
         }
 
         function showHistory() {
@@ -523,10 +484,7 @@
                 b.className = "btn"; b.innerText = "CODE: " + code;
                 b.onclick = () => {
                     const d = localStorage.getItem('words_' + code);
-                    if(d) {
-                        currentWords = JSON.parse(d);
-                        showScreen('menu-screen');
-                    }
+                    if(d) { currentWords = JSON.parse(d); showScreen('menu-screen'); }
                 };
                 list.appendChild(b);
             });
@@ -535,10 +493,7 @@
 
         function pickStudent(side) {
             let inputId = (side === 'p') ? 'student-list-p' : (side === 'l' ? 'team-a-nums' : 'team-b-nums');
-            let inputElem = document.getElementById(inputId);
-            if(!inputElem) return;
-            
-            let val = inputElem.value;
+            let val = document.getElementById(inputId).value;
             let pool = [];
             val.split(',').forEach(p => {
                 if(p.includes('-')) {
@@ -546,18 +501,15 @@
                     for(let i=parseInt(r[0]); i<=parseInt(r[1]); i++) pool.push(i);
                 } else pool.push(parseInt(p));
             });
-            const result = pool[Math.floor(Math.random() * pool.length)] || "-";
-            document.getElementById('num-' + side).innerText = result;
+            document.getElementById('num-' + side).innerText = pool[Math.floor(Math.random() * pool.length)] || "-";
         }
 
         function confirmSetup() {
             document.getElementById('team-l-label').innerText = document.getElementById('team-a-name').value;
             document.getElementById('team-r-label').innerText = document.getElementById('team-b-name').value;
-            scoreA = 0; scoreB = 0;
-            updateScoreDisplay();
-            startGame(gameStyle);
+            scoreA = 0; scoreB = 0; updateScoreDisplay(); startGame(gameStyle);
         }
-
+        
         document.getElementById('word-input').value = currentWords.join('\n');
     </script>
 </body>
