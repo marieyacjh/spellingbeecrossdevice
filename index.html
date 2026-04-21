@@ -217,9 +217,9 @@
         const qwerty = [["Q","W","E","R","T","Y","U","I","O","P"], ["A","S","D","F","G","H","J","K","L"], ["Z","X","C","V","B","N","M"]];
 
         // --- CLOUD STORAGE CONFIG ---
-        // Using a free public store (jsonbox or similar logic)
         const CLOUD_API = "https://api.jsonbin.io/v3/b";
-        const MASTER_KEY = "$2a$10$7R8Yf0.E5M8t0S5Wv.B3uO5v7E6Q.2YvR.Xf6G5v7E6Q.2YvR.Xf6"; // Placeholder logic for demo
+        // YOUR UPDATED MASTER KEY
+        const MASTER_KEY = "$2a$10$v3nd9C5rsdN9mSEF7wa2DundqvfYxwzC2P4D8lB0wF3Mtp3.j5TLm"; 
 
         // --- Animations ---
         function createBees() {
@@ -436,11 +436,11 @@
         }
 
         function hideNextButtons() {
-            document.getElementById('next-btn-p').style.display = 'none';
-            document.getElementById('next-btn-duel').style.display = 'none';
+            if(document.getElementById('next-btn-p')) document.getElementById('next-btn-p').style.display = 'none';
+            if(document.getElementById('next-btn-duel')) document.getElementById('next-btn-duel').style.display = 'none';
         }
 
-        // --- NEW CLOUD SYNC LOGIC ---
+        // --- UPDATED CLOUD SYNC LOGIC ---
 
         function generateShortCode() {
             return Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -456,22 +456,19 @@
 
             const code = generateShortCode();
 
-            // Using a public-accessible key-value store for classroom use
             try {
-                // Storing locally as backup
-                localStorage.setItem('words_' + code, JSON.stringify(list));
-                
-                // Saving to Cloud (using CountAPI/JSONBin approach for cross-device)
-                await fetch(`https://api.jsonbin.io/v3/b`, {
+                // Saving to Cloud using your actual Master Key
+                await fetch(CLOUD_API, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Bin-Name': code,
-                        'X-Master-Key': '$2a$10$H8hW.8m.97kY6/u1vS8mueUue7.Uo.fO7e7W6u8m.97kY6/u1vS8m' // Public Key
+                        'X-Master-Key': MASTER_KEY
                     },
                     body: JSON.stringify(list)
                 });
 
+                localStorage.setItem('words_' + code, JSON.stringify(list));
                 let history = JSON.parse(localStorage.getItem('history') || "[]");
                 history.unshift(code);
                 localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
@@ -480,7 +477,7 @@
                 alert("GAME SAVED!\nYour 4-character code is: " + code + "\n\nUse this on any iPad or Mobile device!");
                 showScreen('menu-screen');
             } catch (e) {
-                alert("Saved locally, but cloud sync failed. Ensure you have internet.");
+                alert("Error saving to cloud. Please check your internet connection.");
             } finally {
                 saveBtn.innerText = "SAVE & GENERATE CODE";
                 saveBtn.disabled = false;
@@ -494,32 +491,27 @@
             const loadBtn = document.getElementById('load-btn');
             loadBtn.innerText = "LOADING...";
             
-            // 1. Try local first
-            const localData = localStorage.getItem('words_' + code);
-            if(localData) {
-                currentWords = JSON.parse(localData);
-                loadBtn.innerText = "LOAD GAME";
-                showScreen('menu-screen');
-                return;
-            }
-
-            // 2. Try Cloud (Scan for Bins with that name)
             try {
-                // For a production classroom app, you'd use a dedicated database. 
-                // Here we fetch via the Bin ID logic or a search.
-                const response = await fetch(`https://api.jsonbin.io/v3/b/65f12345...`, { // This would be your search endpoint
-                    headers: { 'X-Master-Key': '...' }
+                // Fetch from cloud using your Master Key
+                const response = await fetch(`${CLOUD_API}/latest?meta=false`, {
+                    headers: { 
+                        'X-Master-Key': MASTER_KEY,
+                        'X-Bin-Name': code
+                    }
                 });
-                // Note: Simplified for this environment. 
-                // To make this 100% reliable without a paid server, 
-                // I've used the internal localStorage + a prompt.
-                
-                // If you want real-time cross-device, I recommend hosting the JSON on a simple GitHub Gist or Firebase.
-                alert("Code not found on this device. Make sure the 'Teacher' computer is connected to the internet.");
+
+                if (response.ok) {
+                    currentWords = await response.json();
+                    localStorage.setItem('words_' + code, JSON.stringify(currentWords));
+                    showScreen('menu-screen');
+                } else {
+                    alert("Code not found. Check the code and try again.");
+                }
             } catch (e) {
-                alert("Connection Error.");
+                alert("Connection Error. Is the device online?");
+            } finally {
+                loadBtn.innerText = "LOAD GAME";
             }
-            loadBtn.innerText = "LOAD GAME";
         }
 
         function showHistory() {
@@ -543,7 +535,10 @@
 
         function pickStudent(side) {
             let inputId = (side === 'p') ? 'student-list-p' : (side === 'l' ? 'team-a-nums' : 'team-b-nums');
-            let val = document.getElementById(inputId).value;
+            let inputElem = document.getElementById(inputId);
+            if(!inputElem) return;
+            
+            let val = inputElem.value;
             let pool = [];
             val.split(',').forEach(p => {
                 if(p.includes('-')) {
